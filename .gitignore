@@ -1,0 +1,13 @@
+modelos_reciclaje_mobilenet/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+.idea/
+.vscode/
+*.ipynb_checkpoints/
+test_sample.jpeg
