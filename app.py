@@ -15,16 +15,25 @@ st.set_page_config(
 # Título y descripción
 st.title("♻️ Clasificador de Residuos con IA")
 st.write("Sube una imagen de un residuo y la IA te dirá de qué material es.")
+st.caption("Desarrollado por **José Carlos Torres**")
 
 # Cargar modelo y clases
 @st.cache_resource
 def load_model():
-    model_path = Path("modelo_reciclaje_mobilenet/waste_mobilenet.h5")
-    if model_path.exists():
-        model = tf.keras.models.load_model(model_path, compile=False)
-        return model
-    else:
-        st.error("No se encontró el modelo. Ejecuta primero el notebook de entrenamiento.")
+    keras_path = Path("modelo_reciclaje_mobilenet/waste_mobilenet.keras")
+    h5_path = Path("modelo_reciclaje_mobilenet/waste_mobilenet.h5")
+    try:
+        if keras_path.exists():
+            model = tf.keras.models.load_model(str(keras_path), compile=False)
+            return model
+        elif h5_path.exists():
+            model = tf.keras.models.load_model(str(h5_path), compile=False)
+            return model
+        else:
+            st.error("No se encontró el modelo. Ejecuta primero el notebook de entrenamiento.")
+            return None
+    except Exception as e:
+        st.error(f"Error al cargar el modelo: {e}")
         return None
 
 @st.cache_resource
