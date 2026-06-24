@@ -1,40 +1,40 @@
 import streamlit as st
-import tensorflow as tf
 import numpy as np
 from PIL import Image
 import json
 from pathlib import Path
 
-# Configuración de la página
+try:
+    import tflite_runtime.interpreter as tflite
+    USE_TFLITE = True
+except ImportError:
+    import tensorflow as tf
+    USE_TFLITE = False
+
 st.set_page_config(
     page_title="Clasificador de Residuos",
     page_icon="♻️",
     layout="centered"
 )
 
-# Título y descripción
 st.title("♻️ Clasificador de Residuos con IA")
 st.write("Sube una imagen de un residuo y la IA te dirá de qué material es.")
 st.caption("Desarrollado por **José Carlos Torres**")
 
-# Cargar modelo y clases
 @st.cache_resource
 def load_model():
-    keras_path = Path("modelo_reciclaje_mobilenet/waste_mobilenet.keras")
+    tflite_path = Path("modelo_reciclaje_mobilenet/waste_mobilenet.tflite")
     h5_path = Path("modelo_reciclaje_mobilenet/waste_mobilenet.h5")
-    try:
-        if keras_path.exists():
-            model = tf.keras.models.load_model(str(keras_path), compile=False)
-            return model
-        elif h5_path.exists():
-            model = tf.keras.models.load_model(str(h5_path), compile=False)
-            return model
-        else:
-            st.error("No se encontró el modelo. Ejecuta primero el notebook de entrenamiento.")
-            return None
-    except Exception as e:
-        st.error(f"Error al cargar el modelo: {e}")
-        return None
+
+    if USE_TFLITE and tflite_path.exists():
+        interpreter = tflite.Interpreter(model_path=str(tflite_path))
+        interpreter.allocate_tensors()
+        return ("tflite", interpreter)
+    elif not USE_TFLITE and h5_path.exists():
+        model = tf.keras.models.load_model(str(h5_path), compile=False)
+        return ("keras", model)
+    else:
+        return (None, None)
 
 @st.cache_resource
 def load_class_names():
@@ -42,11 +42,8 @@ def load_class_names():
     if json_path.exists():
         with open(json_path, "r", encoding="utf-8") as f:
             return json.load(f)
-    else:
-        st.error("No se encontró el archivo de clases.")
-        return None
+    return None
 
-# Diccionario de traducción
 LABELS_ES = {
     "cardboard": "Cartón",
     "glass": "Vidrio",
@@ -58,59 +55,57 @@ LABELS_ES = {
 
 IMG_SIZE = (224, 224)
 
-# Cargar recursos
-model = load_model()
+model_type, model = load_model()
 class_names = load_class_names()
 
-if model and class_names:
-    # Interfaz de usuario
-    uploaded_file = st.file_uploader(
-        "Elige una imagen...",
-        type=["jpg", "jpeg", "png", "webp"]
-    )
+uploaded_file = st.file_uploader(
+    "Elige una imagen...",
+    type=["jpg", "jpeg", "png", "webp"]
+)
 
-    if uploaded_file is not None:
-        # Mostrar imagen
-        image = Image.open(uploaded_file).convert("RGB")
-        st.image(image, caption="Imagen subida", use_column_width=True)
+if uploaded_file is not None:
+    image = Image.open(uploaded_file).convert("RGB")
+    st.image(image, caption="Imagen subida", use_column_width=True)
 
-        # Preprocesar imagen
-        img_resized = image.resize(IMG_SIZE)
-        arr = np.array(img_resized, dtype=np.float32) / 255.0
-        arr = np.expand_dims(arr, axis=0)
+    img_resized = image.resize(IMG_SIZE)
+    arr = np.array(img_resized, dtype=np.float32) / 255.0
+    arr = np.expand_dims(arr, axis=0)
 
-        # Hacer predicción
-        with st.spinner("Analizando..."):
+    with st.spinner("Analizando..."):
+        if model_type == "tflite":
+            input_details = model.get_input_details()
+            output_details = model.get_output_details()
+            model.set_tensor(input_details[0]['index'], arr)
+            model.invoke()
+            preds = model.get_tensor(output_details[0]['index'])[0]
+        elif model_type == "keras":
             preds = model.predict(arr, verbose=0)[0]
+        else:
+            st.error("No se pudo cargar el modelo.")
+            st.stop()
 
-        # Mostrar resultados
-        st.subheader("Resultados:")
+    st.subheader("Resultados:")
 
-        # Top 3 predicciones
-        top3_idx = np.argsort(preds)[-3:][::-1]
+    top3_idx = np.argsort(preds)[-3:][::-1]
 
-        for idx in top3_idx:
-            raw = class_names[idx]
-            nombre_es = LABELS_ES.get(raw, raw)
-            prob = preds[idx] * 100
+    for idx in top3_idx:
+        raw = class_names[idx]
+        nombre_es = LABELS_ES.get(raw, raw)
+        prob = preds[idx] * 100
+        st.progress(prob / 100)
+        st.write(f"**{nombre_es}**: {prob:.2f}%")
 
-            # Barra de progreso
-            st.progress(prob / 100)
-            st.write(f"**{nombre_es}**: {prob:.2f}%")
+    top_class = class_names[np.argmax(preds)]
+    st.success(f"**Predicción principal: {LABELS_ES.get(top_class, top_class)}**")
 
-        # Predicción principal
-        top_class = class_names[np.argmax(preds)]
-        st.success(f"**Predicción principal: {LABELS_ES.get(top_class, top_class)}**")
+else:
+    st.info("Sube una imagen para comenzar la clasificación.")
 
-    else:
-        st.info("Sube una imagen para comenzar la clasificación.")
-
-# Información lateral
-st.sidebar.header(" Acerca de")
+st.sidebar.header("Acerca de")
 st.sidebar.info(
     "Este clasificador utiliza un modelo MobileNetV2 "
     "entrenado con imágenes de residuos reciclables."
 )
-st.sidebar.header(" Clases:")
+st.sidebar.header("Clases:")
 for clase in class_names if class_names else []:
     st.sidebar.write(f"- {LABELS_ES.get(clase, clase)}")
